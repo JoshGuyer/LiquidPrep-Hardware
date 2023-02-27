@@ -9,7 +9,7 @@
 #include <BLEUtils.h>
 #include <BLEServer.h>
 
-#define FIRMWARE_VERSION           "0.2.1";
+#define FIRMWARE_VERSION           "0.2.2";
 // See the following for generating UUIDs:
 // https://www.uuidgenerator.net/
 
@@ -29,58 +29,12 @@ int SensorPin = 32;
 int soilMoistureValue = 0;
 float soilmoisturepercent=0;
 const char* fwVersion = FIRMWARE_VERSION;
-StaticJsonDocument<512> doc;
+DynamicJsonDocument doc(1024);
 
-void homePage() {
-  String htmlResponse = "";
-  String jsonString2 = "";
-  char jsonString[300];
-  char temp[10];
-  unsigned int totalBytes = 0;
-  unsigned int usedBytes = 0;
-  
-  htmlResponse = "<!DOCTYPE html>\
-  <html lang=\"en\">\
-    <head>\
-      <meta charset=\"utf-8\">\
-      <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
-    </head>\
-    <body>\
-      <h1>Get moisture reading</h1>\
-      <div>\
-        <div class=\"moisture_container\">Moisture: </div><br>\
-        <button id=\"moisture_button\" class=\"moist\">Get Moisture</button>\
-      </div>\
-      <h3>Remove wifi</h3>\
-      <div>\
-        <div class=\"wifi_container\">Wifi: </div><br>\
-        <button id=\"wifi_button\" class=\"moist\">Remove Wifi</button>\
-      </div>\
-      <script src=\"https://ajax.googleapis.com/ajax/libs/jquery/1.11.3/jquery.min.js\"></script>\
-      <script>\
-        var message;\
-        var msg;\
-        $('.moist').click(function(e){\
-          e.preventDefault();\
-          if(e.target.id === 'moisture_button') {\
-            msg = 'msg1';\
-            message = $('#msg1').val();\
-            $.get('/moisture', function(data){\
-              $('.moisture_container')[0].innerText = 'Moisture: ' + data + '%';\
-              console.log(data);\
-            });\
-          }\
-          else if(e.target.id === 'wifi_button') {\
-            $.get('/cancelwifi', function(data){\
-              $('.wifi_container')[0].innerText = data;\
-              console.log(data);\
-            });\
-          }\
-        });\
-      </script>";
-  htmlResponse = htmlResponse + "<br></body></html>";
-  Server.send ( 200, "text/html", htmlResponse );
-}
+unsigned long previousMillis = 0;
+unsigned long currentMillis;
+unsigned long interval=1000; //interval for reading data
+bool isCalibrating = false;
 
 void calculate() {
   int val = analogRead(SensorPin);  // connect sensor to Analog pin
@@ -96,7 +50,7 @@ void calculate() {
   } else if(soilmoisturepercent > 100) {
     soilmoisturepercent = 100;
   }
-  Serial.printf("sensor reading: %d - %f%\n", val, soilmoisturepercent);  // print the value to serial port
+  Serial.printf("sensor reading: %d - %.2f%% WaterVal: %d AirVal: %d\n", val, soilmoisturepercent, waterValue, airValue);  // print the value to serial port
   dtostrf(soilmoisturepercent, 1, 2, str);
   moistureLevel = str;
   // TODO:  only push value when there is a device connected
@@ -104,57 +58,6 @@ void calculate() {
 //https://community.blynk.cc/t/interesting-esp32-issue-cant-use-analogread-with-wifi-and-or-esp-wifimanager-library/49130
 }
 
-void cancelwifi(void) {
-  AutoConnectCredential credential;
-  station_config_t config;
-  uint8_t ent = credential.entries();
-  String msg = "";
-
-  Serial.println("AutoConnectCredential deleting");
-  if (ent)
-    Serial.printf("Available %d entries.\n", ent);
-  else {
-    Serial.println("No credentials saved.");
-    WiFi.disconnect(true, true); // Clear memorized STA configuration
-    if (!WiFi.isConnected()) {
-      Serial.println("WiFi disconnected");
-    }
-    Server.send ( 200, "text/html", "WiFi disconnected" );
-    return;
-  }
-
-  while (ent--) {
-    credential.load((int8_t)0, &config);
-    if (credential.del((const char*)&config.ssid[0])) {
-      Serial.printf("%s deleted.\n", (const char*)config.ssid);
-    } else {
-      Serial.printf("%s failed to delete.\n", (const char*)config.ssid);
-    }  
-  }
-  WiFi.disconnect(true, true); // Clear memorized STA configuration
-  if (!WiFi.isConnected()) {
-    Serial.println("WiFi disconnected");
-  }
-  Server.send ( 200, "text/html", "WiFi disconnected" );
-}
-
-void moisture() {
-  calculate();
-  Server.send ( 200, "text/html", moistureLevel );
-}
-
-void moistureJson() {
-  calculate();
-  String response = "{\"moisture\": " + moistureLevel + "}";
-  Server.send( 200, "text/json", response);
-}
-
-String onHome(AutoConnectAux& aux, PageArgument& args) {
-  calculate();
-  Serial.println(moistureLevel);
-  aux["results"].as<AutoConnectText>().value = moistureLevel;
-  return String();
-}
 String saveJson() {
   String msg = "";
   File configFile = SPIFFS.open("/config.json", "w+"); 
@@ -169,9 +72,76 @@ String saveJson() {
   return msg;
 }
 
+void moisture() {
+  calculate();
+  Server.send ( 200, "text/html", moistureLevel );
+}
+
+void moistureJson() {
+  calculate();
+  String response = "{\"moisture\": " + moistureLevel + "}";
+  Server.send( 200, "text/json", response);
+}
+
+void getWaterVal() {
+  Serial.println("Put Moisture sensor in water for calibration");
+  int minValue = 4096;
+  for (int i = 0; i < 32; i++){
+    int val = analogRead(doc["pin"]);
+    Serial.println(val);
+    if (val < minValue){
+      minValue = val;
+    }
+    delay(500);
+  }
+  Serial.println(minValue);
+  waterValue = doc["waterValue"] = minValue;
+}
+
+void getDryVal() {
+  Serial.println("Leave Moisture sensor out of water for calibration");
+  int maxValue = 0;
+  for (int i = 0; i < 32; i++) {
+    int val = analogRead(doc["pin"]);
+    Serial.println(val);
+    if (val > maxValue) {
+      maxValue = val;
+    }
+    delay(500);
+  }
+  Serial.println(maxValue);
+  airValue = doc["airValue"] = maxValue;
+}
+
+void calibrateFunc() {
+  Server.send( 200, "text/html", "Leave moisture sensor out of water for calibration");
+  getDryVal();
+  Server.send( 200, "text/html", "Put moisture sensor in water for calibration");
+  getWaterVal();
+  saveJson();
+  Server.send( 200,  "text/html", "Calibrated!");
+}
+
+String onHome(AutoConnectAux& aux, PageArgument& args) {
+  calculate();
+  Serial.println(moistureLevel);
+  aux["results"].as<AutoConnectText>().value = moistureLevel;
+  return String();
+}
+
+void ACCalibrateDry(AutoConnectButton& me, AutoConnectAux& aux){
+  getDryVal();
+  saveJson();
+}
+void ACCalibrateWater(AutoConnectButton& me, AutoConnectAux& aux){
+  getWaterVal();
+  saveJson();
+}
+
 String onSaveConfig(AutoConnectAux& aux, PageArgument& args) {
   airValue = doc["airValue"] = args.arg("airValue").toInt();
   waterValue = doc["waterValue"] = args.arg("waterValue").toInt();
+  SensorPin = doc["pin"] = args.arg("pin").toInt();
   String msg = saveJson();
   aux["results"].as<AutoConnectText>().value = msg;
   return String();
@@ -184,6 +154,9 @@ String onUpdateConfig(AutoConnectAux& aux, PageArgument& args) {
   value = doc["airValue"];
   Serial.println(value);
   aux["airValue"].as<AutoConnectInput>().value = value;
+  value = doc["pin"];
+  Serial.println(value);
+  aux["pin"].as<AutoConnectInput>().value = value;
   return String();
 }
 
@@ -212,10 +185,16 @@ void enableBluetooth() {
 }
 
 void setup() {
+  int waitCount = 0;
   delay(1000);
   Serial.begin(115200);
   Serial.println();
-  SPIFFS.begin();
+  enableBluetooth();
+  Serial.println(WiFi.macAddress());
+
+  while (!SPIFFS.begin(true) && waitCount++ < 3) {
+    delay(1000);
+  }
 
   File page = SPIFFS.open("/page.json", "r");
   if(page) {
@@ -242,28 +221,59 @@ void setup() {
   Config.hostName = "liquid-prep";
   Config.ota = AC_OTA_BUILTIN;
   Config.otaExtraCaption = fwVersion;
+  Config.apid = "esp32ap1";
+  Config.portalTimeout = 10000;
+  Config.beginTimeout = 10000;
   Portal.config(Config);
   Portal.on("/update_config", onUpdateConfig);
   Portal.on("/save_config", onSaveConfig);
   Portal.on("/", onHome);
-  Portal.begin();
-
-  Server.enableCORS();
-  Server.on("/moisture", moisture);
-  Server.on("/moisture.json", moistureJson);
-  Serial.println("Connecting");
+  AutoConnectAux& calibrate = Portal.locate("/calibrate");
+  AutoConnectButton& calibrateDry = calibrate["calibrateDry"].as<AutoConnectButton>();
+  calibrateDry.on(ACCalibrateDry);
+  AutoConnectButton& calibrateWater = calibrate["calibrateWater"].as<AutoConnectButton>();
+  calibrateWater.on(ACCalibrateWater);
   if (Portal.begin()) {
     Serial.println("WiFi connected: " + WiFi.localIP().toString());
   }
-  while(WiFi.status() != WL_CONNECTED) {
+  Server.enableCORS();
+  Server.on("/moisture", moisture);
+  Server.on("/moisture.json", moistureJson);
+  Server.on("/calibrate", calibrateFunc);
+  
+  Serial.println("Connecting");
+  
+  waitCount = 0;
+  while (WiFi.status() != WL_CONNECTED && waitCount++ < 3) {
     delay(500);
     Serial.print(".");
   }
-  enableBluetooth();
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.print("Failed to connect to WiFi");
+  }
+  
 }
 
 void loop() {
   Portal.handleClient();
-  calculate();
-  delay(1000);
+  currentMillis=millis();
+  char input[20];
+  byte n = Serial.available();
+  if(n != 0)
+  {
+    byte m = Serial.readBytes(input, 20);
+    Serial.print(input);
+    if (strcmp(input, "calibrate") == 0) {
+      calibrateFunc();
+      String msg = saveJson();
+    }
+    memset(input, 0x00, 20);
+  }
+  if (currentMillis - previousMillis >= interval) {
+    previousMillis = currentMillis;
+    calculate();
+  } else if(previousMillis == 0) {
+    previousMillis = 1;
+    calculate();
+  }
 }

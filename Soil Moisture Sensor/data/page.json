@@ -29,6 +29,15 @@
       {
         "name": "caption3",
         "type": "ACText",
+        "value": "Pin"
+      },
+      {
+        "name": "pin",
+        "type": "ACInput"
+      },
+      {
+        "name": "caption4",
+        "type": "ACText",
         "value": "Service uuid"
       },
       {
@@ -36,7 +45,7 @@
         "type": "ACInput"
       },
       {
-        "name": "caption4",
+        "name": "caption5",
         "type": "ACText",
         "value": "Characteristic uuid"
       },
@@ -84,6 +93,38 @@
         "type": "ACSubmit",
         "value": "Read again...",
         "uri": "/"
+      }
+    ]
+  },
+  {
+    "uri": "/calibrate",
+    "title": "Calibrate sensor",
+    "menu": true,
+    "element": [
+      {
+        "name": "header",
+        "type": "ACText"
+      },
+      {
+        "name": "caption1",
+        "type": "ACText",
+        "value": "Calibrate dry value (Leave sensor out of water for 15 seconds)"
+      },
+      {
+        "name": "calibrateDry",
+        "type": "ACButton",
+        "value" : "Calibrate",
+        "posterior" : "br"
+      },
+      {
+        "name": "caption2",
+        "type": "ACText",
+        "value": "Calibrate water value (Put sensor in water for 15 seconds)"
+      },
+      {
+        "name": "calibrateWater",
+        "type": "ACButton",
+        "value" : "Calibrate"
       }
     ]
   }
