@@ -223,7 +223,6 @@ void setup() {
   Config.otaExtraCaption = fwVersion;
   Config.apid = "esp32ap1";
   Config.portalTimeout = 10000;
-  Config.beginTimeout = 10000;
   Portal.config(Config);
   Portal.on("/update_config", onUpdateConfig);
   Portal.on("/save_config", onSaveConfig);
@@ -263,7 +262,7 @@ void loop() {
   {
     byte m = Serial.readBytes(input, 20);
     Serial.print(input);
-    if (strcmp(input, "calibrate") == 0) {
+    if ((strcmp(input, "calibrate") == 0) || (strcmp(input, "c") == 0)) {
       calibrateFunc();
       String msg = saveJson();
     }
